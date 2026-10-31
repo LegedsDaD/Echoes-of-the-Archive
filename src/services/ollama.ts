@@ -34,29 +34,22 @@ export class OllamaService {
     return this.endpoint;
   }
 
-  /**
-   * Health and version checks
-   */
   async checkHealth(): Promise<{ state: ConnectionState; version?: string; errorMessage?: string }> {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
-
       const response = await fetch(`${this.endpoint}/api/version`, {
         method: 'GET',
         signal: controller.signal,
         headers: { 'Accept': 'application/json' },
       });
-
       clearTimeout(timeoutId);
-
       if (!response.ok) {
         return {
           state: 'error',
           errorMessage: `Ollama returned HTTP ${response.status}: ${response.statusText}`,
         };
       }
-
       const data = await response.json();
       return {
         state: 'connected',
@@ -69,8 +62,6 @@ export class OllamaService {
           errorMessage: `Connection timed out trying to reach ${this.endpoint}. Ensure Ollama is running.`,
         };
       }
-
-      // Check if it's likely a CORS / Network failure
       const isCorsOrNetwork = err instanceof TypeError && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'));
       if (isCorsOrNetwork) {
         return {
@@ -78,7 +69,6 @@ export class OllamaService {
           errorMessage: `Browser could not connect to ${this.endpoint}. Either Ollama is not started, or CORS is blocking browser requests. Start Ollama with OLLAMA_ORIGINS="*" environment variable.`,
         };
       }
-
       return {
         state: 'disconnected',
         errorMessage: err.message || 'Unable to connect to Ollama runtime.',
@@ -86,28 +76,24 @@ export class OllamaService {
     }
   }
 
-  /**
-   * Model discovery
-   */
   async listModels(): Promise<OllamaModel[]> {
     try {
       const response = await fetch(`${this.endpoint}/api/tags`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
       });
-
       if (!response.ok) {
         throw new Error(`Failed to list models: HTTP ${response.status}`);
       }
-
       const data = await response.json();
       const rawModels: any[] = data.models || [];
-
+      
       return rawModels.map((m) => {
         const nameLower = (m.name || '').toLowerCase();
         const familyLower = (m.details?.family || '').toLowerCase();
-        
-        // Detect vision capability from model names and families
+        const familiesStr = (m.details?.families || []).join(' ').toLowerCase();
+
+        // Robust detection for LLaVA and vision-capable models
         const isVision = 
           nameLower.includes('llava') ||
           nameLower.includes('vision') ||
@@ -115,12 +101,13 @@ export class OllamaService {
           nameLower.includes('gemma3') ||
           nameLower.includes('gemma-3') ||
           nameLower.includes('bakllava') ||
-          nameLower.includes('minicpm-v') ||
+          nameLower.includes('minicpm') ||
           nameLower.includes('cogvlm') ||
           familyLower.includes('clip') ||
-          familyLower.includes('mllama');
+          familyLower.includes('mllama') ||
+          familiesStr.includes('clip') ||
+          familiesStr.includes('vision');
 
-        // Detect embedding capability
         const isEmbedding =
           nameLower.includes('embed') ||
           nameLower.includes('nomic') ||
@@ -145,9 +132,6 @@ export class OllamaService {
     }
   }
 
-  /**
-   * Model information
-   */
   async getModelInfo(modelName: string): Promise<any> {
     try {
       const response = await fetch(`${this.endpoint}/api/show`, {
@@ -155,7 +139,6 @@ export class OllamaService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: modelName }),
       });
-
       if (!response.ok) return null;
       return await response.json();
     } catch (err) {
@@ -164,9 +147,6 @@ export class OllamaService {
     }
   }
 
-  /**
-   * Pull model with streaming progress
-   */
   async pullModel(
     modelName: string,
     onProgress: (progress: OllamaPullProgress) => void,
@@ -178,28 +158,22 @@ export class OllamaService {
       body: JSON.stringify({ name: modelName, stream: true }),
       signal,
     });
-
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
       throw new Error(`Failed to pull model '${modelName}': HTTP ${response.status} - ${errorText}`);
     }
-
     if (!response.body) {
       throw new Error('ReadableStream not supported on pull response');
     }
-
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
-
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
-
       for (const line of lines) {
         if (!line.trim()) continue;
         try {
@@ -212,18 +186,13 @@ export class OllamaService {
     }
   }
 
-  /**
-   * Vision photograph analysis via /api/generate with image base64
-   */
   async analyzePhotograph(
     model: string,
     imageBase64: string,
     prompt: string,
     signal?: AbortSignal
   ): Promise<string> {
-    // Strip data URL header if present
     const cleanBase64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
-
     const response = await fetch(`${this.endpoint}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -233,24 +202,19 @@ export class OllamaService {
         images: [cleanBase64],
         stream: false,
         options: {
-          temperature: 0.2, // Low temperature for factual visual observations
+          temperature: 0.2,
         },
       }),
       signal,
     });
-
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
       throw new Error(`Vision analysis failed: HTTP ${response.status} - ${errText}`);
     }
-
     const data = await response.json();
     return data.response || '';
   }
 
-  /**
-   * Chat generation with streaming support
-   */
   async streamChat(
     model: string,
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
@@ -275,29 +239,23 @@ export class OllamaService {
       }),
       signal: options.signal,
     });
-
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
       throw new Error(`Chat generation failed: HTTP ${response.status} - ${errText}`);
     }
-
     if (!response.body) {
       throw new Error('ReadableStream not supported on chat response');
     }
-
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let fullResponse = '';
     let buffer = '';
-
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
-
       for (const line of lines) {
         if (!line.trim()) continue;
         try {
@@ -312,13 +270,9 @@ export class OllamaService {
         }
       }
     }
-
     return fullResponse;
   }
 
-  /**
-   * Text generation without chat format
-   */
   async generateText(
     model: string,
     prompt: string,
@@ -339,22 +293,16 @@ export class OllamaService {
       }),
       signal: options?.signal,
     });
-
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
       throw new Error(`Generation failed: HTTP ${response.status} - ${errText}`);
     }
-
     const data = await response.json();
     return data.response || '';
   }
 
-  /**
-   * Generate vector embeddings
-   */
   async generateEmbedding(model: string, text: string): Promise<number[]> {
     try {
-      // First try /api/embeddings
       const response = await fetch(`${this.endpoint}/api/embeddings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -363,13 +311,10 @@ export class OllamaService {
           prompt: text,
         }),
       });
-
       if (response.ok) {
         const data = await response.json();
         return data.embedding || [];
       }
-
-      // Try /api/embed if newer Ollama version
       const embedResp = await fetch(`${this.endpoint}/api/embed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -378,12 +323,10 @@ export class OllamaService {
           input: text,
         }),
       });
-
       if (embedResp.ok) {
         const embedData = await embedResp.json();
         return (embedData.embeddings && embedData.embeddings[0]) || [];
       }
-
       throw new Error(`Embedding API returned status ${response.status}`);
     } catch (err: any) {
       console.warn('Embedding generation error:', err);

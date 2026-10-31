@@ -28,17 +28,12 @@ export type ActiveNavTab =
   | 'settings';
 
 interface ArchiveContextValue {
-  // Navigation
   activeTab: ActiveNavTab;
   setActiveTab: (tab: ActiveNavTab) => void;
-
-  // Active items
   activePortraitId: string | null;
   setActivePortraitId: (id: string | null) => void;
   activeConversationId: string | null;
   setActiveConversationId: (id: string | null) => void;
-
-  // Data lists
   portraits: Portrait[];
   memories: MemoryItem[];
   documents: DocumentItem[];
@@ -46,21 +41,15 @@ interface ArchiveContextValue {
   activityTasks: ActivityTask[];
   storageStats: StorageStats | null;
   settings: AppSettings;
-
-  // Ollama
   ollamaStatus: OllamaStatus;
   refreshOllama: () => Promise<void>;
   updateSettings: (newSettings: Partial<AppSettings>) => Promise<void>;
-
-  // Actions
   createOrUpdatePortrait: (portrait: Portrait) => Promise<void>;
   deletePortrait: (id: string) => Promise<void>;
   addMemory: (memory: Omit<MemoryItem, 'id' | 'createdAt'>) => Promise<MemoryItem>;
   deleteMemory: (id: string) => Promise<void>;
   createConversation: (portraitId: string, title?: string, mode?: SimulationMode) => Promise<Conversation>;
   deleteConversation: (id: string) => Promise<void>;
-  
-  // AI Operations
   analyzeImageWithVision: (imageBase64: string, prompt?: string) => Promise<VisionAnalysisResult>;
   generateSimulatedPersonality: (
     name: string,
@@ -78,8 +67,6 @@ interface ArchiveContextValue {
     modelOverride?: string
   ) => Promise<void>;
   pullModelWithProgress: (modelName: string) => Promise<void>;
-
-  // Activity Log
   logTask: (
     category: ActivityTask['category'],
     title: string,
@@ -90,14 +77,10 @@ interface ArchiveContextValue {
     finish: (status?: 'completed' | 'failed' | 'cancelled', err?: string) => void;
   };
   clearActivityLogs: () => Promise<void>;
-
-  // Backup & Storage
   exportBackup: () => Promise<string>;
   importBackup: (json: string) => Promise<{ portraitsAdded: number; memoriesAdded: number }>;
   clearAllArchiveData: () => Promise<void>;
   refreshStorageStats: () => Promise<void>;
-
-  // CORS dialog control
   showCorsModal: boolean;
   setShowCorsModal: (show: boolean) => void;
 }
@@ -123,7 +106,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [activeTab, setActiveTab] = useState<ActiveNavTab>('dashboard');
   const [activePortraitId, setActivePortraitId] = useState<string | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-
   const [portraits, setPortraits] = useState<Portrait[]>([]);
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -132,7 +114,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [showCorsModal, setShowCorsModal] = useState<boolean>(false);
-
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus>({
     state: 'connecting',
     endpoint: DEFAULT_SETTINGS.ollamaEndpoint,
@@ -142,10 +123,8 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
     activeConversationModel: DEFAULT_SETTINGS.preferredConversationModel,
     activeEmbeddingModel: DEFAULT_SETTINGS.preferredEmbeddingModel,
   });
-
   const isInitialLoad = useRef(true);
 
-  // Task logging helper
   const logTask = useCallback(
     (
       category: ActivityTask['category'],
@@ -156,7 +135,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const startTime = Date.now();
       const startedAt = new Date().toISOString();
-
       const initialTask: ActivityTask = {
         id: taskId,
         category,
@@ -167,10 +145,8 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
         progressPercent: indeterminate ? undefined : 0,
         startedAt,
       };
-
       setActivityTasks((prev) => [initialTask, ...prev]);
       dbService.saveActivity(initialTask).catch(console.warn);
-
       return {
         updateProgress: (percent: number, desc?: string) => {
           setActivityTasks((prev) =>
@@ -189,7 +165,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
         finish: (status: 'completed' | 'failed' | 'cancelled' = 'completed', err?: string) => {
           const completedAt = new Date().toISOString();
           const durationMs = Date.now() - startTime;
-
           setActivityTasks((prev) =>
             prev.map((t) => {
               if (t.id === taskId) {
@@ -213,30 +188,28 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
     []
   );
 
-  // Check Ollama status
   const refreshOllama = useCallback(async () => {
     setOllamaStatus((prev) => ({ ...prev, state: 'connecting' }));
     const task = logTask('ollama_connection', 'Ollama Connection Probe', `Connecting to ${settings.ollamaEndpoint}...`);
-
     try {
       ollamaService.setEndpoint(settings.ollamaEndpoint);
       const health = await ollamaService.checkHealth();
-
       if (health.state === 'connected') {
         const models = await ollamaService.listModels();
-
-        // Discover active vision and conversation models from installed models
+        
         const visionModel =
+          models.find((m) => m.name === settings.preferredVisionModel)?.name ||
           models.find((m) => m.isVisionCapable)?.name ||
           models.find((m) => m.name.toLowerCase().includes('llava'))?.name ||
           settings.preferredVisionModel;
 
         const convModel =
+          models.find((m) => m.name === settings.preferredConversationModel)?.name ||
           models.find((m) => !m.isEmbeddingCapable)?.name ||
-          models[0]?.name ||
           settings.preferredConversationModel;
 
         const embedModel =
+          models.find((m) => m.name === settings.preferredEmbeddingModel)?.name ||
           models.find((m) => m.isEmbeddingCapable)?.name ||
           settings.preferredEmbeddingModel;
 
@@ -250,7 +223,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
           activeConversationModel: convModel,
           activeEmbeddingModel: embedModel,
         });
-
         task.finish('completed');
       } else {
         setOllamaStatus({
@@ -263,7 +235,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
           activeConversationModel: settings.preferredConversationModel,
           activeEmbeddingModel: settings.preferredEmbeddingModel,
         });
-
         task.finish('failed', health.errorMessage);
       }
     } catch (e: any) {
@@ -277,12 +248,10 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
         activeConversationModel: settings.preferredConversationModel,
         activeEmbeddingModel: settings.preferredEmbeddingModel,
       });
-
       task.finish('failed', e.message);
     }
   }, [settings.ollamaEndpoint, settings.preferredVisionModel, settings.preferredConversationModel, settings.preferredEmbeddingModel, logTask]);
 
-  // Load IndexedDB data & seed if empty
   const loadArchiveData = useCallback(async () => {
     try {
       const savedSettings = await dbService.getSettings();
@@ -290,12 +259,10 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setSettings(savedSettings);
         ollamaService.setEndpoint(savedSettings.ollamaEndpoint);
       }
-
       let loadedPortraits = await dbService.getAllPortraits();
       let loadedMemories = await dbService.getAllMemories();
       let loadedConversations = await dbService.getAllConversations();
 
-      // Seed initial portraits if IndexedDB is empty
       if (loadedPortraits.length === 0) {
         const seedTask = logTask('local_data_storage', 'Initialize Archival Repository', 'Seeding archival historical portraits & primary records...');
         for (const p of SEED_PORTRAITS) {
@@ -310,27 +277,21 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
         for (const msg of SEED_MESSAGES) {
           await dbService.saveMessage(msg);
         }
-
         loadedPortraits = SEED_PORTRAITS;
         loadedMemories = SEED_MEMORIES;
         loadedConversations = SEED_CONVERSATIONS;
         seedTask.finish('completed');
       }
-
       const loadedDocs = await dbService.getAllDocuments();
       const loadedActivities = await dbService.getActivityLogs(80);
-
       setPortraits(loadedPortraits);
       setMemories(loadedMemories);
       setDocuments(loadedDocs);
       setConversations(loadedConversations);
       setActivityTasks(loadedActivities);
-
       if (loadedPortraits.length > 0) {
         setActivePortraitId(loadedPortraits[0].id);
       }
-
-      // Storage estimate
       const stats = await dbService.getStorageStats();
       setStorageStats(stats);
     } catch (err) {
@@ -338,7 +299,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [logTask]);
 
-  // Initial mount
   useEffect(() => {
     if (isInitialLoad.current) {
       isInitialLoad.current = false;
@@ -353,7 +313,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setStorageStats(stats);
   }, []);
 
-  // Update Settings
   const updateSettings = useCallback(
     async (newSettings: Partial<AppSettings>) => {
       const merged = { ...settings, ...newSettings };
@@ -367,7 +326,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [settings, refreshOllama]
   );
 
-  // Portrait CRUD
   const createOrUpdatePortrait = useCallback(
     async (portrait: Portrait) => {
       const isNew = !portraits.some((p) => p.id === portrait.id);
@@ -376,7 +334,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
         isNew ? `Inscribe Portrait: ${portrait.name}` : `Update Portrait: ${portrait.name}`,
         `Persisting archival profile to browser IndexedDB...`
       );
-
       await dbService.savePortrait(portrait);
       setPortraits((prev) => {
         const index = prev.findIndex((p) => p.id === portrait.id);
@@ -387,7 +344,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
         return [portrait, ...prev];
       });
-
       setActivePortraitId(portrait.id);
       await refreshStorageStats();
       task.finish('completed');
@@ -403,19 +359,16 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setPortraits((prev) => prev.filter((p) => p.id !== id));
       setMemories((prev) => prev.filter((m) => m.portraitId !== id));
       setConversations((prev) => prev.filter((c) => c.portraitId !== id));
-
       if (activePortraitId === id) {
         const remaining = portraits.filter((p) => p.id !== id);
         setActivePortraitId(remaining.length > 0 ? remaining[0].id : null);
       }
-
       await refreshStorageStats();
       task.finish('completed');
     },
     [portraits, activePortraitId, logTask, refreshStorageStats]
   );
 
-  // Memories CRUD
   const addMemory = useCallback(
     async (memoryInput: Omit<MemoryItem, 'id' | 'createdAt'>): Promise<MemoryItem> => {
       const newMemory: MemoryItem = {
@@ -423,10 +376,7 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
         id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         createdAt: new Date().toISOString(),
       };
-
       const task = logTask('local_data_storage', `Archived Primary Memory: ${newMemory.title}`, `Persisting to Memory Vault...`);
-
-      // Attempt to generate vector embedding if Ollama is connected & has embedding model
       if (ollamaStatus.state === 'connected' && ollamaStatus.activeEmbeddingModel) {
         const embedTask = logTask('embedding_generation', `Vector Embedding: ${newMemory.title}`, `Calling Ollama ${ollamaStatus.activeEmbeddingModel}...`);
         try {
@@ -444,15 +394,11 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
           embedTask.finish('failed', e.message);
         }
       }
-
       await dbService.saveMemory(newMemory);
       setMemories((prev) => [newMemory, ...prev]);
-
-      // Update portrait memory count
       setPortraits((prev) =>
         prev.map((p) => (p.id === newMemory.portraitId ? { ...p, memoryCount: (p.memoryCount || 0) + 1 } : p))
       );
-
       await refreshStorageStats();
       task.finish('completed');
       return newMemory;
@@ -469,7 +415,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [refreshStorageStats]
   );
 
-  // Conversation CRUD
   const createConversation = useCallback(
     async (portraitId: string, title?: string, mode: SimulationMode = 'historical'): Promise<Conversation> => {
       const portrait = portraits.find((p) => p.id === portraitId);
@@ -482,7 +427,6 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updatedAt: new Date().toISOString(),
         messageCount: 0,
       };
-
       await dbService.saveConversation(conv);
       setConversations((prev) => [conv, ...prev]);
       setActiveConversationId(conv.id);
@@ -496,50 +440,28 @@ export const ArchiveProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setConversations((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
-  // AI Vision Analysis
   const analyzeImageWithVision = useCallback(
     async (imageBase64: string, customPrompt?: string): Promise<VisionAnalysisResult> => {
+      const modelToUse = ollamaStatus.activeVisionModel || settings.preferredVisionModel || 'llava:latest';
       const task = logTask(
         'photograph_analysis',
         'Analyze Archival Portrait Photograph',
-        `Sending image to Ollama vision model (${ollamaStatus.activeVisionModel})...`
+        `Sending image to Ollama vision model (${modelToUse})...`
       );
-
       const prompt =
         customPrompt ||
-        `Examine this historical portrait photograph or painting with rigorous archival objectivity.
-Provide structured observations across visible attributes:
-1. Clothing & Attire: Visible garments, fabric, collar, drape, historical formality.
-2. Pose & Expression: Head tilt, facial expression, gaze direction, emotional poise.
-3. Accessories & Hair: Jewelry, eyewear, hairstyle, objects held.
-4. Background & Setting: Architectural elements, drapery, backdrop, studio vs outdoor.
-5. Estimated Era & Style: Artistic medium (e.g. oil on canvas, daguerreotype, albumen print, gelatin silver print) and historical era style.
-6. Lighting & Atmosphere: Key light direction, contrast, chiaroscuro, tonal quality.
-
-CRITICAL ARCHIVAL GUIDELINES:
-- Do NOT perform facial recognition or guess identity from facial morphology.
-- Do NOT infer internal memories, beliefs, or personal moral qualities from appearance.
-- Report only objective visible visual features.`;
-
+        `Examine this historical portrait photograph or painting with rigorous archival objectivity. Provide structured observations across visible attributes: 1. Clothing & Attire: Visible garments, fabric, collar, drape, historical formality. 2. Pose & Expression: Head tilt, facial expression, gaze direction, emotional poise. 3. Accessories & Hair: Jewelry, eyewear, hairstyle, objects held. 4. Background & Setting: Architectural elements, drapery, backdrop, studio vs outdoor. 5. Estimated Era & Style: Artistic medium (e.g. oil on canvas, daguerreotype, albumen print, gelatin silver print) and historical era style. 6. Lighting & Atmosphere: Key light direction, contrast, chiaroscuro, tonal quality. CRITICAL ARCHIVAL GUIDELINES: - Do NOT perform facial recognition or guess identity from facial morphology. - Do NOT infer internal memories, beliefs, or personal moral qualities from appearance. - Report only objective visible visual features.`;
       try {
         let visionText = '';
         if (ollamaStatus.state === 'connected') {
           visionText = await ollamaService.analyzePhotograph(
-            ollamaStatus.activeVisionModel,
+            modelToUse,
             imageBase64,
             prompt
           );
         } else {
-          // If Ollama is disconnected, provide rich educational fallback notice explaining vision model requirement
-          visionText = `[Archival Visual Observation Log]:
-Clothing: Detailed formal period dress consistent with 19th-century academic portraiture.
-Expression: Composed, serene countenance with level direct gaze.
-Accessories: Classic coiffure and formal period adornment.
-Background: Subtle directional chiaroscuro with subdued architectural studio depth.
-Artistic Medium: Gelatin silver or oil on canvas archival representation.
-Lighting: Warm key lighting illuminating facial contours and textile textures.`;
+          visionText = `[Archival Visual Observation Log]: Clothing: Detailed formal period dress consistent with 19th-century academic portraiture. Expression: Composed, serene countenance with level direct gaze. Accessories: Classic coiffure and formal period adornment. Background: Subtle directional chiaroscuro with subdued architectural studio depth. Artistic Medium: Gelatin silver or oil on canvas archival representation. Lighting: Warm key lighting illuminating facial contours and textile textures.`;
         }
-
         const result: VisionAnalysisResult = {
           clothing: extractSection(visionText, 'Clothing') || 'Formal period attire consistent with the era.',
           expression: extractSection(visionText, 'Expression') || 'Composed, thoughtful, and dignified countenance.',
@@ -548,11 +470,10 @@ Lighting: Warm key lighting illuminating facial contours and textile textures.`;
           estimatedEraStyle: extractSection(visionText, 'Estimated Era') || 'Historical portraiture.',
           artisticMedium: extractSection(visionText, 'Medium') || 'Fine art archival portrait.',
           lightingAndAtmosphere: extractSection(visionText, 'Lighting') || 'Directional studio illumination.',
-          technicalNotes: `Analyzed via ${ollamaStatus.activeVisionModel} at ${new Date().toLocaleTimeString()}`,
+          technicalNotes: `Analyzed via ${modelToUse} at ${new Date().toLocaleTimeString()}`,
           analyzedAt: new Date().toISOString(),
-          modelUsed: ollamaStatus.activeVisionModel,
+          modelUsed: modelToUse,
         };
-
         task.finish('completed');
         return result;
       } catch (err: any) {
@@ -560,10 +481,9 @@ Lighting: Warm key lighting illuminating facial contours and textile textures.`;
         throw err;
       }
     },
-    [ollamaStatus, logTask]
+    [ollamaStatus, settings.preferredVisionModel, logTask]
   );
 
-  // Personality Simulation Generation
   const generateSimulatedPersonality = useCallback(
     async (
       name: string,
@@ -578,34 +498,7 @@ Lighting: Warm key lighting illuminating facial contours and textile textures.`;
         `Synthesize Simulated Personality: ${name}`,
         `Generating structured historical, memorial, and creative simulation profiles...`
       );
-
-      const prompt = `You are a master historical archivist and cognitive simulation architect.
-Build a structured simulation profile for:
-Subject: ${name}
-Era / Historical Period: ${era}
-Profession / Calling: ${profession}
-Biography: ${biography}
-Visual Analysis Notes: ${visionNotes}
-Primary Documents & Memoirs: ${knowledgeText.slice(0, 1500)}
-
-Output valid JSON matching this schema exactly:
-{
-  "documentedFacts": ["fact 1", "fact 2", "fact 3"],
-  "userMemories": ["memory or documented letter excerpt 1", "memory 2"],
-  "aiInterpretations": ["interpretation of philosophical outlook 1", "interpretation 2"],
-  "traits": {
-    "tone": "Luminous, articulate, and stoic",
-    "formality": "formal",
-    "temperament": "Contemplative and determined",
-    "coreBeliefs": ["belief 1", "belief 2"],
-    "characteristicPhrases": ["phrase 1", "phrase 2"],
-    "uncertaintyHandling": "Acknowledges historical gaps gracefully"
-  },
-  "systemPromptHistorical": "System prompt strictly commanding historical fidelity...",
-  "systemPromptMemorial": "System prompt emphasizing personal letters and memorial honor...",
-  "systemPromptCreative": "System prompt allowing thoughtful speculative dialogue..."
-}`;
-
+      const prompt = `You are a master historical archivist and cognitive simulation architect. Build a structured simulation profile for: Subject: ${name} Era / Historical Period: ${era} Profession / Calling: ${profession} Biography: ${biography} Visual Analysis Notes: ${visionNotes} Primary Documents & Memoirs: ${knowledgeText.slice(0, 1500)} Output valid JSON matching this schema exactly:   "documentedFacts": ["fact 1", "fact 2", "fact 3"],   "userMemories": ["memory or documented letter excerpt 1", "memory 2"],   "aiInterpretations": ["interpretation of philosophical outlook 1", "interpretation 2"],   "traits": {     "tone": "Luminous, articulate, and stoic",     "formality": "formal",     "temperament": "Contemplative and determined",     "coreBeliefs": ["belief 1", "belief 2"],     "characteristicPhrases": ["phrase 1", "phrase 2"],     "uncertaintyHandling": "Acknowledges historical gaps gracefully"   },   "systemPromptHistorical": "System prompt strictly commanding historical fidelity...",   "systemPromptMemorial": "System prompt emphasizing personal letters and memorial honor...",   "systemPromptCreative": "System prompt allowing thoughtful speculative dialogue..."`;
       try {
         let jsonStr = '';
         if (ollamaStatus.state === 'connected') {
@@ -615,13 +508,11 @@ Output valid JSON matching this schema exactly:
             'You are an expert archival historian. Return only raw valid JSON without markdown fences.'
           );
         }
-
         let parsed: any = null;
         try {
           const clean = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
           parsed = JSON.parse(clean);
         } catch {
-          // Fallback parsing or sensible fallback synthesis
           parsed = {
             documentedFacts: [
               `Known historical figure active during ${era}.`,
@@ -655,7 +546,6 @@ Output valid JSON matching this schema exactly:
             systemPromptCreative: `You are an AI creative dialogue partner embodying ${name}. Disclose clearly that this is an inspired creative simulation.`,
           };
         }
-
         task.finish('completed');
         return parsed;
       } catch (err: any) {
@@ -666,7 +556,6 @@ Output valid JSON matching this schema exactly:
     [ollamaStatus, logTask]
   );
 
-  // Chat Streaming with Local RAG retrieval
   const sendChatMessage = useCallback(
     async (
       conversationId: string,
@@ -678,7 +567,6 @@ Output valid JSON matching this schema exactly:
       const portrait = portraits.find((p) => p.id === portraitId);
       if (!portrait) throw new Error('Portrait not found');
 
-      // 1. Add User Message
       const userMessageId = `msg-${Date.now()}-user`;
       const userMsg: Message = {
         id: userMessageId,
@@ -688,19 +576,15 @@ Output valid JSON matching this schema exactly:
         timestamp: new Date().toISOString(),
         mode,
       };
-
       await dbService.saveMessage(userMsg);
 
-      // 2. Perform Local RAG Retrieval from Memory Vault
       const ragTask = logTask(
         'memory_retrieval',
         `Retrieve Archival Memories: "${userText.slice(0, 30)}..."`,
         `Searching local IndexedDB memory records for relevant primary sources...`
       );
-
       const portraitMemories = memories.filter((m) => m.portraitId === portraitId);
       let queryEmbedding: number[] | undefined;
-
       if (ollamaStatus.state === 'connected' && ollamaStatus.activeEmbeddingModel) {
         try {
           queryEmbedding = await ollamaService.generateEmbedding(
@@ -708,10 +592,9 @@ Output valid JSON matching this schema exactly:
             userText
           );
         } catch {
-          // Fallback to lexical
+          // Fallback
         }
       }
-
       const relevantMemories = ragService.searchRelevantMemories(
         userText,
         portraitMemories,
@@ -719,40 +602,26 @@ Output valid JSON matching this schema exactly:
         3,
         0.12
       );
-
       const { contextString, citations } = ragService.buildRagContext(relevantMemories);
       ragTask.finish('completed');
 
-      // 3. Prepare System Prompt according to Simulation Mode
       let baseSystemPrompt = portrait.personality.systemPromptHistorical;
       if (mode === 'memorial') {
         baseSystemPrompt = portrait.personality.systemPromptMemorial;
       } else if (mode === 'creative') {
         baseSystemPrompt = portrait.personality.systemPromptCreative;
       }
-
-      const mandatoryDisclaimer = `
-CRITICAL DISCLOSURE REQUIREMENT:
-You are an AI-generated historical simulation operating inside the user's web browser, NOT an actual deceased human spirit or medium.
-Simulation Mode: ${mode.toUpperCase()} MODE.
-${mode === 'historical' ? 'Priority: Absolute historical accuracy. Admit ignorance of undocumented matters.' : ''}
-${mode === 'memorial' ? 'Priority: Personal memories and supplied letters. Acknowledge emotional nuance.' : ''}
-${mode === 'creative' ? 'Priority: Creative dialogue clearly labeled as fictionalized philosophical exploration.' : ''}
-`;
-
+      const mandatoryDisclaimer = ` CRITICAL DISCLOSURE REQUIREMENT: You are an AI-generated historical simulation operating inside the user's web browser, NOT an actual deceased human spirit or medium. Simulation Mode: ${mode.toUpperCase()} MODE.`;
       const fullSystemPrompt = `${baseSystemPrompt}\n${mandatoryDisclaimer}\n${contextString}`;
 
-      // 4. Retrieve recent message history
       const existingMsgs = await dbService.getMessagesByConversation(conversationId);
       const chatHistory = existingMsgs.slice(-8).map((m) => ({
         role: m.sender === 'user' ? ('user' as const) : ('assistant' as const),
         content: m.content,
       }));
 
-      // 5. Create placeholder Assistant Message
       const assistantMessageId = `msg-${Date.now()}-ai`;
-      const modelToUse = modelOverride || ollamaStatus.activeConversationModel || 'ollama';
-
+      const modelToUse = modelOverride || ollamaStatus.activeConversationModel || settings.preferredConversationModel || 'gemma3:8b';
       const initialAssistantMsg: Message = {
         id: assistantMessageId,
         conversationId,
@@ -764,18 +633,14 @@ ${mode === 'creative' ? 'Priority: Creative dialogue clearly labeled as fictiona
         citations,
         isStreaming: true,
       };
-
       await dbService.saveMessage(initialAssistantMsg);
 
-      // 6. Stream from Ollama
       const chatTask = logTask(
         'chat_generation',
         `Simulate Voice: ${portrait.name}`,
         `Streaming response via ${modelToUse}...`
       );
-
       let accumulatedContent = '';
-
       if (ollamaStatus.state === 'connected') {
         try {
           await ollamaService.streamChat(
@@ -787,7 +652,6 @@ ${mode === 'creative' ? 'Priority: Creative dialogue clearly labeled as fictiona
             },
             (delta) => {
               accumulatedContent += delta;
-              // Update message in database periodically
             }
           );
         } catch (err: any) {
@@ -795,7 +659,6 @@ ${mode === 'creative' ? 'Priority: Creative dialogue clearly labeled as fictiona
           chatTask.finish('failed', err.message);
         }
       } else {
-        // High-fidelity local simulation response for demonstration / testing when Ollama is offline
         accumulatedContent = generateSimulatedOfflineResponse(portrait, mode, userText, relevantMemories);
       }
 
@@ -804,10 +667,8 @@ ${mode === 'creative' ? 'Priority: Creative dialogue clearly labeled as fictiona
         content: accumulatedContent,
         isStreaming: false,
       };
-
       await dbService.saveMessage(finalAssistantMsg);
 
-      // Update Conversation record
       const conv = conversations.find((c) => c.id === conversationId);
       if (conv) {
         const updatedConv: Conversation = {
@@ -819,17 +680,14 @@ ${mode === 'creative' ? 'Priority: Creative dialogue clearly labeled as fictiona
         await dbService.saveConversation(updatedConv);
         setConversations((prev) => prev.map((c) => (c.id === conversationId ? updatedConv : c)));
       }
-
       chatTask.finish('completed');
     },
     [portraits, memories, ollamaStatus, settings, conversations, logTask]
   );
 
-  // Pull Model with real bytes progress
   const pullModelWithProgress = useCallback(
     async (modelName: string) => {
       const task = logTask('model_download', `Download Model: ${modelName}`, `Initiating model pull via Ollama /api/pull...`, false);
-
       try {
         await ollamaService.pullModel(modelName, (progress) => {
           if (progress.total && progress.completed) {
@@ -841,7 +699,6 @@ ${mode === 'creative' ? 'Priority: Creative dialogue clearly labeled as fictiona
             task.updateProgress(0, progress.status);
           }
         });
-
         task.finish('completed');
         await refreshOllama();
       } catch (err: any) {
@@ -933,14 +790,12 @@ export const useArchive = () => {
   return ctx;
 };
 
-// Helper to extract named sections from visual text
 function extractSection(text: string, label: string): string {
   const regex = new RegExp(`${label}[:\\s]+([^\\n]+(?:\\n(?!\\d\\.|[A-Z][a-z]+:)[^\\n]+)*)`, 'i');
   const match = text.match(regex);
   return match ? match[1].trim() : '';
 }
 
-// Fallback high-fidelity local voice generator when Ollama is offline or connecting
 function generateSimulatedOfflineResponse(
   portrait: Portrait,
   mode: SimulationMode,
@@ -950,12 +805,10 @@ function generateSimulatedOfflineResponse(
   const citationsNote = relevantMemories.length > 0 
     ? `\n\n*(Sourced from Primary Archival Records: ${relevantMemories.map(m => `"${m.memory.title}"`).join(', ')})*`
     : '';
-
   const modePrefix = mode === 'historical' 
-    ? '[Historical Fidelity Mode - Sourced from Documented Archives]' 
-    : mode === 'memorial' 
-    ? '[Memorial Mode - Drawing on Personal Letters & Reminiscences]' 
+    ? '[Historical Fidelity Mode - Sourced from Documented Archives]'
+    : mode === 'memorial'
+    ? '[Memorial Mode - Drawing on Personal Letters & Reminiscences]'
     : '[Creative Dialogue Mode - Inspired Speculative Conversation]';
-
   return `${modePrefix}\n\nGreetings. I receive your inquiry regarding "${userQuery.slice(0, 45)}...". \n\nAs recorded in our historical annals of the ${portrait.historicalPeriod}, ${portrait.biography.slice(0, 160)}... \n\nWe must remember: in an archival simulation, we do not summon the spirit of the departed, but rather animate the documented thoughts, letters, and enduring convictions inscribed in the historical record. ${citationsNote}\n\n*(Note: Ollama runtime is currently disconnected at http://localhost:11434. To enable live neural model inference with streaming tokens, launch Ollama with OLLAMA_ORIGINS="*" and refresh.)*`;
 }
